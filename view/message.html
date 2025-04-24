@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Messagerie Sécurisée</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        #messages { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll; }
+        #messageInput, #destinataireInput { width: 80%; margin-bottom: 5px; }
+        button { padding: 5px 10px; }
+    </style>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <h2>Messagerie Sécurisée</h2>
+    <div>
+        <label for="destinataireInput">Destinataire ID :</label>
+        <input type="text" id="destinataireInput" placeholder="ID du destinataire">
+    </div>
+    <div id="messages"></div>
+    <input type="text" id="messageInput" placeholder="Écrivez un message...">
+    <button onclick="sendMessage()">Envoyer</button>
+
+    <script>
+        const ws = new WebSocket('ws://localhost:3000');
+        const userId = 1; // ID de l'utilisateur actuel, à récupérer dynamiquement
+        const messagesBox = document.getElementById("messages");
+
+        ws.onopen = () => {
+            console.log("✅ Connecté au serveur WebSocket");
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.destinataire === userId || data.expediteur === userId) {
+                    displayMessage(data.message, data.expediteur === userId ? 'Moi' : `Utilisateur ${data.expediteur}`);
+                }
+            } catch (error) {
+                console.error("Erreur de traitement du message WebSocket :", error);
+            }
+        };
+
+        function fetchMessages() {
+            $.ajax({
+                url: `http://localhost:3000/api/received/${userId}`,
+                method: "GET",
+                success: function(response) {
+                    response.forEach(msg => displayMessage(msg.message, `Utilisateur ${msg.expediteur}`));
+                },
+                error: function(xhr, status, error) {
+                    console.error("Erreur lors du chargement des messages :", error);
+                }
+            });
+        }
+
+        function displayMessage(message, sender) {
+            const messageElement = document.createElement("p");
+            messageElement.textContent = `${sender}: ${message}`;
+            messagesBox.appendChild(messageElement);
+            messagesBox.scrollTop = messagesBox.scrollHeight;
+        }
+
+        function sendMessage() {
+            const input = document.getElementById("messageInput");
+            const destinataireInput = document.getElementById("destinataireInput");
+            const message = input.value.trim();
+            const destinataire = destinataireInput.value.trim();
+
+            if (message === "" || destinataire === "") {
+                alert("Veuillez entrer un message et un destinataire");
+                return;
+            }
+
+            const data = { expediteur: userId, destinataire: parseInt(destinataire), message };
+            
+            // Utilisation de jQuery AJAX
+            $.ajax({
+                url: "http://localhost:3000/api/send",  
+                method: "POST",  
+                contentType: "application/json",  
+                data: JSON.stringify(data),  
+                success: function(response) {
+                    displayMessage(message, 'Moi');  
+                    ws.send(JSON.stringify(data));  
+                    input.value = "";  
+                },
+                error: function(xhr, status, error) {
+                    console.error("Erreur lors de l'envoi du message :", error);
+                    alert("Une erreur est survenue lors de l'envoi du message.");
+                }
+            });
+        }
+
+        fetchMessages();
+    </script>
+</body>
+</html>

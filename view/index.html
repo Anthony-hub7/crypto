@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Utilisateur - Sign Up</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #6e6e6d;
+      margin: 0;
+      padding: 0;
+    }
+  
+    .inscription-container {
+      max-width: 400px;
+      margin: 50px auto;
+      padding: 30px 25px;
+      background-color: #ffffff;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+  
+    .formulaire h3 {
+      color: #075E54;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+  
+    .inscription-container h2 {
+      text-align: center;
+      color: #128C7E;
+      margin-bottom: 10px;
+    }
+  
+    input[type="text"],
+    input[type="email"],
+    input[type="password"] {
+      width: 100%;
+      padding: 12px;
+      margin-bottom: 15px;
+      border: 1px solid #ccc;
+      border-radius: 25px;
+      font-size: 15px;
+      box-sizing: border-box;
+    }
+  
+    button {
+      width: 100%;
+      background-color: #25D366;
+      color: white;
+      border: none;
+      padding: 12px;
+      border-radius: 25px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+  
+    button:hover {
+      background-color: #1ebe5d;
+    }
+  
+    .lien-login {
+      display: block;
+      text-align: center;
+      color: #128C7E;
+      text-decoration: none;
+      font-size: 14px;
+      margin-bottom: 15px;
+    }
+  
+    .lien-login:hover {
+      text-decoration: underline;
+    }
+  </style>
+  
+<body>
+    <div class="inscription-container">
+        <h2>Inscription des utilisateurs</h2>
+        
+        <div class="formulaire">
+          <h3>Ajouter un utilisateur</h3>
+          <input type="text" id="nom" placeholder="Nom" required>
+          <input type="email" id="email" placeholder="Email" required>
+          <input type="password" id="mot_de_passe" placeholder="Mot de passe" required>
+          
+          <a href="/login" class="lien-login">J'ai déjà un compte</a>
+          
+          <button onclick="ajouterUtilisateur()">Inscrire</button>
+        </div>
+      </div>
+      
+    <!--<h3>Liste des utilisateurs</h3>
+    <button onclick="afficherUtilisateurs()">Actualiser</button>
+    <ul id="liste-utilisateurs"></ul>-->
+
+    <script>
+        const API_URL = 'http://localhost:3000/api/users';
+
+        function ajouterUtilisateur() {
+            const nom = $("#nom").val();
+            const email = $("#email").val();
+            const mot_de_passe = $("#mot_de_passe").val();
+
+            // Validation basique des champs
+            if (!nom || !email || !mot_de_passe) {
+                alert("Tous les champs doivent être remplis !");
+                return;
+            }
+
+            $.ajax({
+                url: API_URL,
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({ nom, email, mot_de_passe }),
+                success: function(response) {
+                    alert(response.message);
+                    afficherUtilisateurs();
+                    window.location.href = '/login';
+
+                },
+                error: function(xhr) {
+                    alert("Erreur: " + xhr.responseJSON.error || "Erreur inconnue");
+                }
+            });
+        }
+
+        function afficherUtilisateurs() {
+            $.ajax({
+                url: API_URL,
+                type: "GET",
+                success: function(users) {
+                    let html = "";
+                    users.forEach(user => {
+                        html += `<li>${user.nom} (${user.email}) (${user.id})
+                        <button onclick="supprimerUtilisateur(${user.id})">Supprimer</button>
+                    </li>`;
+                    });
+                    $("#liste-utilisateurs").html(html);
+                },
+                error: function(xhr) {
+                    alert("Erreur: " + xhr.responseJSON.error);
+                }
+            });
+        }
+
+        function supprimerUtilisateur(id) {
+            console.log("Suppression de l'utilisateur avec l'ID:", id);
+            $.ajax({
+                url: API_URL + "/" + id,
+                type: "DELETE",
+                success: function(response) {
+                    alert(response.message);
+                    afficherUtilisateurs();
+                },
+                error: function(xhr) {
+                    alert("Erreur: " + xhr.responseJSON.error || "Erreur inconnue");
+                }
+            });
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!DOCTYPE html> 
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script> <!-- Ajouter la bibliothèque jQuery -->
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f4f4f4;
+        }
+        .login-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            width: 300px;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .message {
+            color: red;
+            font-size: 14px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="login-container">
+        <h2>Se connecter</h2>
+        <form id="loginForm">
+            <input type="email" id="email" placeholder="Email" required>
+            <input type="password" id="mot_de_passe" placeholder="Mot de passe" required>
+            <button type="submit">Se connecter</button>
+        </form>
+        <div class="message" id="message"></div>
+    </div>
+
+    <script>
+        // Fonction pour envoyer la requête de login
+        $('#loginForm').on('submit', function(e) {
+            e.preventDefault();  // Empêcher la soumission par défaut du formulaire
+
+            const email = $('#email').val();
+            const mot_de_passe = $('#mot_de_passe').val();
+
+            $.ajax({
+                url: 'http://localhost:3000/api/auth/login',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    email: email,
+                    mot_de_passe: mot_de_passe
+                }),
+                success: function(data) {
+                    $('#message').css('color', 'green').text('Connexion réussie !');
+                    console.log('Token:', data.token); // Sauvegarde du token dans un cookie local ou stockage
+                    localStorage.setItem('token', data.token);
+                    sessionStorage.setItem('userPassword', mot_de_passe);   
+                    window.location.href = '/profil';
+                },
+                error: function(xhr, status, error) {
+                    const errorMessage = xhr.responseJSON ? xhr.responseJSON.message : 'Erreur inconnue';
+                    $('#message').css('color', 'red').text(errorMessage);
+                }
+            });
+        });
+    </script>
+
+</body>
+</html>

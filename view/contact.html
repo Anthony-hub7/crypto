@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Messagerie Sécurisée</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        #messages { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll; }
+        #messageInput, #destinataireInput { width: 80%; margin-bottom: 5px; }
+        button { padding: 5px 10px; }
+    </style>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <h2>Messagerie Sécurisée</h2>
+    <div>
+        <label for="destinataireInput">Destinataire ID :</label>
+        <input type="text" id="destinataireInput" placeholder="ID du destinataire">
+    </div>
+    <div id="messages"></div>
+    <input type="text" id="messageInput" placeholder="Écrivez un message...">
+    <button onclick="sendMessage()">Envoyer</button>
+
+    <script>
+        const ws = new WebSocket('ws://localhost:3000');
+        let userId = null; // ID de l'utilisateur actuel
+        const messagesBox = document.getElementById("messages");
+
+        // 🔹 Récupération du token et de l'ID utilisateur
+        $(document).ready(function() {
+            const token = localStorage.getItem('token'); // Récupérer le token depuis le localStorage
+            if (!token) {
+                window.location.href = '/login'; // Si aucun token n'est trouvé, rediriger vers la page de connexion
+                return;
+            }
+
+            // Récupérer l'ID de l'utilisateur à partir du serveur
+            $.ajax({
+                url: 'http://localhost:3000/api/getUserId', // API pour récupérer l'ID utilisateur
+                method: 'GET',
+                headers: { 'Authorization': 'Bearer ' + token },
+                success: function(data) {
+                    userId = data.id; // Stocker l'ID de l'utilisateur
+                    fetchMessages(); // Récupérer les messages une fois l'utilisateur authentifié
+                },
+                error: function() {
+                    localStorage.removeItem('token');
+                    window.location.href = '/login'; // Rediriger vers la page de login si une erreur survient
+                }
+            });
+        });
+
+        // WebSocket pour gérer les messages en temps réel
+        ws.onopen = () => {
+            console.log("✅ Connecté au serveur WebSocket");
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.destinataire === userId || data.expediteur === userId) {
+                    displayMessage(data.message, data.expediteur === userId ? 'Moi' : `Utilisateur ${data.expediteur}`);
+                }
+            } catch (error) {
+                console.error("Erreur de traitement du message WebSocket :", error);
+            }
+        };
+
+        // Fonction pour afficher les messages
+        function displayMessage(message, sender) {
+            const messageElement = document.createElement("p");
+            messageElement.textContent = `${sender}: ${message}`;
+            messagesBox.appendChild(messageElement);
+            messagesBox.scrollTop = messagesBox.scrollHeight;
+        }
+
+        // Fonction pour récupérer les messages de l'utilisateur
+        function fetchMessages() {
+            $.ajax({
+                url: `http://localhost:3000/api/received/${userId}`, // URL pour récupérer les messages
+                method: "GET",
+                headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') },
+                success: function(response) {
+                    response.forEach(msg => displayMessage(msg.message, `Utilisateur ${msg.expediteur}`));
+                },
+                error: function(xhr, status, error) {
+                    console.error("Erreur lors du chargement des messages :", error);
+                }
+            });
+        }
+
+        // Fonction pour envoyer un message
+        function sendMessage() {
+            const input = document.getElementById("messageInput");
+            const destinataireInput = document.getElementById("destinataireInput");
+            const message = input.value.trim();
+            const destinataire = destinataireInput.value.trim();
+
+            if (message === "" || destinataire === "") {
+                alert("Veuillez entrer un message et un destinataire");
+                return;
+            }
+
+            const data = { expediteur: userId, destinataire: parseInt(destinataire), message };
+
+            $.ajax({
+                url: "http://localhost:3000/api/send",  // URL de l'API pour envoyer le message
+                method: "POST",
+                contentType: "application/json",
+                headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }, // Envoi du token dans l'en-tête
+                data: JSON.stringify(data),
+                success: function(response) {
+                    displayMessage(message, 'Moi');
+                    ws.send(JSON.stringify(data));  // Envoi du message via WebSocket
+                    input.value = "";  // Réinitialiser le champ de message
+                },
+                error: function(xhr, status, error) {
+                    console.error("Erreur lors de l'envoi du message :", error);
+                    alert("Une erreur est survenue lors de l'envoi du message.");
+                }
+            });
+        }
+    </script>
+</body>
+</html>

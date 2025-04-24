@@ -1,0 +1,518 @@
+const db = require('../database/db');
+const forge = require('node-forge');
+const bcrypt = require('bcrypt');
+
+class MessageModel {
+    static async sendMessage(expediteur, destinataire, message) {
+        try {
+            // 🔹 Récupération des clés publiques des deux utilisateurs
+            const rows = await new Promise((resolve, reject) => {
+                db.query(`
+                    SELECT id_utilisateur, cle_publique FROM utilisateurs 
+                    WHERE id_utilisateur IN (?, ?)`, 
+                    [expediteur, destinataire],
+                    (error, results) => {
+                        if (error) return reject(error);  // Si erreur, rejeter la promesse
+                        resolve(results);  // Résoudre la promesse avec les résultats
+                    }
+                );
+            });
+    
+            console.log("Résultat de la requête SQL:", rows);  // Affiche ce que retourne la requête
+    
+            // Vérification si rows est un tableau et contient bien les deux utilisateurs
+            if (!Array.isArray(rows) || rows.length < 2) {
+                throw new Error('Les deux utilisateurs (expéditeur et destinataire) doivent être présents dans la base de données.');
+            }
+    
+            let clePubliqueExpediteur, clePubliqueDestinataire;
+    
+            // Assurez-vous que les clés sont récupérées correctement
+            rows.forEach(user => {
+                if (user.id_utilisateur === expediteur) {
+                    clePubliqueExpediteur = forge.pki.publicKeyFromPem(user.cle_publique);
+                }
+                if (user.id_utilisateur === destinataire) {
+                    clePubliqueDestinataire = forge.pki.publicKeyFromPem(user.cle_publique);
+                }
+            });
+    
+            // Vérification si les clés publiques ont été récupérées
+            if (!clePubliqueExpediteur || !clePubliqueDestinataire) {
+                throw new Error("Impossible de récupérer les clés publiques des utilisateurs.");
+            }
+    
+            // 🔹 Chiffrement du message pour l'expéditeur et le destinataire
+            const messageChiffreExpediteur = forge.util.encode64(clePubliqueExpediteur.encrypt(message));
+            const messageChiffreDestinataire = forge.util.encode64(clePubliqueDestinataire.encrypt(message));
+    
+            // 🔹 Sauvegarde du message chiffré
+            await new Promise((resolve, reject) => {
+                db.query(`
+                    INSERT INTO messages (expediteur, destinataire, message_chiffre_expediteur, message_chiffre_destinataire) 
+                    VALUES (?, ?, ?, ?)`,
+                    [expediteur, destinataire, messageChiffreExpediteur, messageChiffreDestinataire],
+                    (error, results) => {
+                        if (error) return reject(error);  // Si erreur, rejeter la promesse
+                        resolve(results);  // Résoudre la promesse avec les résultats
+                    }
+                );
+            });
+    
+            return { message: 'Message envoyé avec succès' };
+        } catch (error) {
+            console.error("Erreur lors de l'envoi du message:", error.message);
+            throw error;
+        }
+    }
+
+    static async decryptSentMessage(expediteur, messageId, motDePasse) {
+        try {
+            const rows = await new Promise((resolve, reject) => {
+                db.query(`
+                    SELECT message_chiffre_expediteur, cle_privee_chiffree, mot_de_passe 
+                    FROM messages
+                    INNER JOIN utilisateurs ON messages.expediteur = utilisateurs.id_utilisateur
+                    WHERE id_message = ? AND expediteur = ?`,
+                    [messageId, expediteur],
+                    (error, results) => {
+                        if (error) return reject(error);
+                        resolve(results);
+                    }
+                );
+            });
+
+            if (rows.length === 0) {
+                throw new Error('Message non trouvé ou accès non autorisé');
+            }
+
+            const { message_chiffre_expediteur, cle_privee_chiffree, mot_de_passe } = rows[0];
+
+            // 🔹 Vérification du mot de passe
+            const passwordMatch = await bcrypt.compare(motDePasse, mot_de_passe);  // Comparaison avec le mot de passe haché dans la base de données
+            if (!passwordMatch) throw new Error('Mot de passe incorrect');
+
+            // 🔹 Déchiffrement de la clé privée (simulé)
+            const privateKeyPem = forge.pki.privateKeyFromPem(cle_privee_chiffree);
+            const messageDechiffre = privateKeyPem.decrypt(forge.util.decode64(message_chiffre_expediteur));
+
+            return { message: messageDechiffre };
+        } catch (error) {
+            throw error;
+        }
+    }
+    static async getReceivedMessages(userId) {
+        try {
+            const rows = await new Promise((resolve, reject) => {
+                db.query(`
+                    SELECT messages.id_message, messages.expediteur, messages.message_chiffre_destinataire, utilisateurs.cle_privee_chiffree
+                    FROM messages
+                    INNER JOIN utilisateurs ON messages.destinataire = utilisateurs.id_utilisateur
+                    WHERE messages.destinataire = ?`, 
+                    [userId],
+                    (error, results) => {
+                        if (error) return reject(error);
+                        resolve(results);
+                    }
+                );
+            });
+            return rows;
+        } catch (error) {
+            throw error;
+        }
+    }
+    
+    static async decryptReceivedMessage(destinataire, messageId, motDePasse) {
+        try {
+            const rows = await new Promise((resolve, reject) => {
+                db.query(`
+                    SELECT messages.message_chiffre_destinataire, utilisateurs.cle_privee_chiffree, utilisateurs.mot_de_passe
+                    FROM messages
+                    INNER JOIN utilisateurs ON messages.destinataire = utilisateurs.id_utilisateur
+                    WHERE messages.id_message = ? AND messages.destinataire = ?`,
+                    [messageId, destinataire],
+                    (error, results) => {
+                        if (error) return reject(error);
+                        resolve(results);
+                    }
+                );
+            });
+    
+            if (rows.length === 0) {
+                throw new Error('Message non trouvé ou accès non autorisé');
+            }
+    
+            const { message_chiffre_destinataire, cle_privee_chiffree, mot_de_passe } = rows[0];
+    
+            // Vérification du mot de passe du destinataire
+            const passwordMatch = await bcrypt.compare(motDePasse, mot_de_passe);
+            if (!passwordMatch) throw new Error('Mot de passe incorrect');
+    
+            // Déchiffrement de la clé privée du destinataire
+            const privateKeyPem = forge.pki.privateKeyFromPem(cle_privee_chiffree);
+            const messageDechiffre = privateKeyPem.decrypt(forge.util.decode64(message_chiffre_destinataire));
+    
+            console.log("Message déchiffré :", messageDechiffre);  // Ajoute un log pour vérifier le message déchiffré
+    
+            return { message: messageDechiffre };
+        } catch (error) {
+            console.error("Erreur lors du déchiffrement du message du destinataire:", error.message);
+            throw error;
+        }
+    }
+    
+    
+    
+    
+}
+
+module.exports = MessageModel;
+
+
+
+
+
+
+
+const express = require('express');
+const router = express.Router();
+const MessageModel = require('../src/model/messageModel');
+
+
+// 🔹 Envoyer un message chiffré
+router.post('/send', async (req, res) => {
+    try {
+        const { expediteur, destinataire, message } = req.body;
+        console.log(req.body);
+        if (!expediteur || !destinataire || !message) {
+            return res.status(400).json({ error: "Tous les champs sont requis." });
+        }
+
+        const response = await MessageModel.sendMessage(expediteur, destinataire, message);
+        res.json(response);  // Répondre avec la réponse du modèle
+    } catch (error) {
+        console.error("Erreur lors de l'envoi du message:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 🔹 Récupérer les messages reçus
+router.get('/received/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const password = req.headers['password'];  // Récupérer le mot de passe depuis les en-têtes
+
+        if (!password) {
+            return res.status(400).json({ error: 'Mot de passe manquant dans les en-têtes' });
+        }
+
+        const messages = await MessageModel.getReceivedMessages(userId);
+
+        // 🔹 Déchiffrement des messages avant envoi
+        const decryptedMessages = await Promise.all(messages.map(async (msg) => {
+            if (msg.message_chiffre_destinataire) {
+                try {
+                    const decryptedMessage = await MessageModel.decryptReceivedMessage(userId, msg.id_message, password);
+                    msg.message_dechiffre = decryptedMessage.message; // Ajoute le message déchiffré à la réponse
+                    return msg;
+                } catch (error) {
+                    console.error("❌ Erreur de déchiffrement du message :", error.message);
+                    return msg; // Même si l'erreur de déchiffrement se produit, on renvoie quand même le message chiffré
+                }
+            }
+            return msg;
+        }));
+
+        // 🔹 Envoi des messages déchiffrés ou chiffrés selon le cas
+        res.json(decryptedMessages);  // Réponse envoyée une seule fois ici
+
+    } catch (error) {
+        console.error("❌ Erreur API /received :", error);
+        if (!res.headersSent) {  // Vérification que la réponse n'a pas été envoyée
+            res.status(500).json({ error: error.message });
+        }
+    }
+});
+
+
+
+
+router.post('/received/decrypt/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { messageId, motDePasse } = req.body;
+
+        // Vérification que le mot de passe et le messageId sont fournis
+        if (!messageId || !motDePasse) {
+            return res.status(400).json({ error: "Le mot de passe et l'ID du message sont requis." });
+        }
+
+        // Appel du modèle pour déchiffrer le message reçu
+        const response = await MessageModel.decryptReceivedMessage(userId, messageId, motDePasse);
+
+        // Retourner la réponse déchiffrée
+        res.json(response);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+// 🔹 Déchiffrer un message envoyé
+router.post('/decryptSent', async (req, res) => {
+    try {
+        const { expediteur, messageId, motDePasse } = req.body;
+        if (!expediteur || !messageId || !motDePasse) {
+            return res.status(400).json({ error: "Tous les champs sont requis." });
+        }
+
+        const response = await MessageModel.decryptSentMessage(expediteur, messageId, motDePasse);
+        res.json(response);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+// 🔹 Récupérer et déchiffrer les messages reçus ou envoyés
+
+
+
+
+module.exports = router;
+<!--<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Messagerie Sécurisée & Profil Utilisateur</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+        }
+        .container {
+            width: 300px;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            margin-top: 20px;
+        }
+        #messages {
+            border: 1px solid #ccc;
+            padding: 10px;
+            height: 300px;
+            overflow-y: scroll;
+            width: 100%;
+            background: #fff;
+            text-align: left;
+        }
+        .logout-btn {
+            margin-top: 20px;
+            padding: 10px;
+            width: 100%;
+            background-color: #d9534f;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .logout-btn:hover { background-color: #c9302c; }
+        input, button { margin: 5px 0; padding: 10px; width: 100%; }
+        .message {
+            margin: 5px;
+            padding: 10px;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        .sent {
+            background-color: #e3f2fd;
+        }
+        .received {
+            background-color: #f1f8e9;
+        }
+        .decrypt-button {
+            margin-top: 5px;
+            padding: 5px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .decrypt-button:hover { background-color: #0056b3; }
+    </style>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h2>Profil Utilisateur</h2>
+        <div class="profile-info">
+            <p><strong>Nom:</strong> <span id="userName">Chargement...</span></p>
+            <p><strong>Email:</strong> <span id="userEmail">Chargement...</span></p>
+            <p><strong>ID:</strong> <span id="userId">Chargement...</span></p>
+        </div>
+        <button class="logout-btn" onclick="logout()">Se déconnecter</button>
+    </div>
+
+    <div class="container" id="messagerieSection" style="display: none;">
+        <h2>Messagerie Sécurisée</h2>
+        <input type="text" id="destinataireInput" placeholder="ID du destinataire">
+        <div id="messages">Chargement des messages...</div>
+        <input type="text" id="messageInput" placeholder="Écrivez un message...">
+        <button onclick="sendMessage()">Envoyer</button>
+    </div>
+
+    <script>
+        const ws = new WebSocket('ws://localhost:3000');
+        let userId = null;
+
+        $(document).ready(function() {
+            const token = localStorage.getItem('token');
+            if (!token) { window.location.href = '/login'; return; }
+
+            $.ajax({
+                url: 'http://localhost:3000/api/profil',
+                method: 'GET',
+                headers: { 'Authorization': 'Bearer ' + token },
+                success: function(data) {
+                    $('#userName').text(data.nom);
+                    $('#userEmail').text(data.email);
+                    $('#userId').text(data.id);
+                    userId = data.id;
+                    $('#messagerieSection').show();
+                    fetchMessages();
+                },
+                error: function() { logout(); }
+            });
+        });
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.destinataire === userId || data.expediteur === userId) {
+                    displayMessage(data.message, data.expediteur === userId ? 'Moi' : `Utilisateur ${data.expediteur}`);
+                }
+            } catch (error) {
+                console.error("Erreur WebSocket:", error);
+            }
+        };
+
+        function displayMessage(message, sender, date) {
+    const messagesBox = document.getElementById("messages");
+    const messageElement = document.createElement("div");
+    messageElement.classList.add("message");
+
+    // Vérifiez si le message est reçu ou envoyé
+    if (sender === "Moi") {
+        messageElement.classList.add("sent"); // Classe pour les messages envoyés
+    } else {
+        messageElement.classList.add("received"); // Classe pour les messages reçus
+    }
+
+    // Formatage de la date
+    const formattedDate = new Date(date).toLocaleString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+
+    messageElement.innerHTML = `
+        <p>${sender}: ${message}</p>
+        <span class="timestamp">${formattedDate}</span>
+    `;
+
+    messagesBox.appendChild(messageElement);
+    messagesBox.scrollTop = messagesBox.scrollHeight;
+}
+
+function fetchMessages() {
+    const password = sessionStorage.getItem('userPassword'); 
+    const token = localStorage.getItem('token');
+    
+    if (!password) {
+        console.error('🔑 Le mot de passe est manquant dans sessionStorage.');
+        alert('Le mot de passe est introuvable. Veuillez vous reconnecter.');
+        return;
+    }
+
+    if (!token) {
+        console.error('🔐 Le token d\'authentification est manquant.');
+        alert('Vous devez être connecté pour voir vos messages.');
+        return;
+    }
+
+    if (!userId) {
+        console.error('❌ userId est introuvable.');
+        alert('Problème d\'identification utilisateur. Veuillez vous reconnecter.');
+        return;
+    }
+
+    $.ajax({
+        url: `http://localhost:3000/api/messages/${userId}`,
+        method: "GET",
+        headers: {
+            'Authorization': `Bearer ${token}`,
+            'Password': password
+        },
+        success: function(response) {
+            
+            console.log("📩 Messages reçus et envoyés :", response);
+
+            if (!response || response.length === 0) {
+                console.warn("⚠️ Aucune donnée de message reçue.");
+                displayMessage("Aucun message trouvé.", "Système", new Date());
+                return;
+            }
+
+            response.forEach(msg => {
+                // Vérifiez si le message a un expéditeur ou un destinataire
+                const sender = msg.expediteur ? `Utilisateur ${msg.expediteur}` : "Moi";
+                const message = msg.message_dechiffre ? msg.message_dechiffre : "🔒 Message chiffré";
+                displayMessage(message, sender, msg.date_envoi);
+            });
+        },
+        error: function(xhr, status, error) {
+            console.error("❌ Erreur AJAX :", error);
+            console.error("📜 Réponse du serveur :", xhr.responseText);
+
+            let errorMessage = "Erreur inconnue.";
+            if (xhr.status === 401) {
+                errorMessage = "⛔ Accès non autorisé. Veuillez vous reconnecter.";
+            } else if (xhr.status === 404) {
+                errorMessage = "📭 Aucun message trouvé.";
+            } else if (xhr.status === 500) {
+                errorMessage = "💥 Erreur interne du serveur. Réessayez plus tard.";
+            }
+
+            alert(errorMessage);
+        }
+    });
+}
+
+        function sendMessage() {
+            const message = $('#messageInput').val().trim();
+            const destinataire = $('#destinataireInput').val().trim();
+            if (!message || !destinataire) { alert("Message et destinataire requis."); return; }
+
+            const data = { expediteur: userId, destinataire: parseInt(destinataire), message };
+            $.ajax({
+                url: "http://localhost:3000/api/send",
+                method: "POST",
+                contentType: "application/json",
+                headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') },
+                data: JSON.stringify(data),
+                success: function() {
+                    displayMessage(message, "Moi");
+                    ws.send(JSON.stringify(data));
+                    $('#messageInput').val("");
+                },
+                error: function() { alert("Erreur d'envoi."); }
+            });
+        }
+
+        function logout() {
+            localStorage.removeItem('token');
+            window.location.href = '/login';
+        }
+    </script>
+</body>
+</html>-->

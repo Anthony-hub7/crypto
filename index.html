@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Utilisateur - Sign Up</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <h2>Inscription des utilisateurs</h2>
+
+    <!-- Formulaire pour ajouter un utilisateur -->
+    <h3>Ajouter un utilisateur</h3>
+    <input type="text" id="nom" placeholder="Nom" required>
+    <input type="email" id="email" placeholder="Email" required>
+    <input type="password" id="mot_de_passe" placeholder="Mot de passe" required>
+    <button onclick="ajouterUtilisateur()">Inscrire</button>
+
+    <h3>Liste des utilisateurs</h3>
+    <button onclick="afficherUtilisateurs()">Actualiser</button>
+    <ul id="liste-utilisateurs"></ul>
+
+    <script>
+        const API_URL = 'http://localhost:3000/api/users';
+
+        function ajouterUtilisateur() {
+            const nom = $("#nom").val();
+            const email = $("#email").val();
+            const mot_de_passe = $("#mot_de_passe").val();
+
+            // Validation basique des champs
+            if (!nom || !email || !mot_de_passe) {
+                alert("Tous les champs doivent être remplis !");
+                return;
+            }
+
+            $.ajax({
+                url: API_URL,
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({ nom, email, mot_de_passe }),
+                success: function(response) {
+                    alert(response.message);
+                    afficherUtilisateurs();
+                },
+                error: function(xhr) {
+                    alert("Erreur: " + xhr.responseJSON.error || "Erreur inconnue");
+                }
+            });
+        }
+
+        function afficherUtilisateurs() {
+            $.ajax({
+                url: API_URL,
+                type: "GET",
+                success: function(users) {
+                    let html = "";
+                    users.forEach(user => {
+                        html += `<li>${user.nom} (${user.email}) (${user.id})
+                        <button onclick="supprimerUtilisateur(${user.id})">Supprimer</button>
+                    </li>`;
+                    });
+                    $("#liste-utilisateurs").html(html);
+                },
+                error: function(xhr) {
+                    alert("Erreur: " + xhr.responseJSON.error);
+                }
+            });
+        }
+
+        function supprimerUtilisateur(id) {
+            console.log("Suppression de l'utilisateur avec l'ID:", id);
+            $.ajax({
+                url: API_URL + "/" + id,
+                type: "DELETE",
+                success: function(response) {
+                    alert(response.message);
+                    afficherUtilisateurs();
+                },
+                error: function(xhr) {
+                    alert("Erreur: " + xhr.responseJSON.error || "Erreur inconnue");
+                }
+            });
+        }
+    </script>
+</body>
+</html>
