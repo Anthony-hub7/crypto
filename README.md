@@ -1,2 +1,2 @@
 # crypto
- ceci est une mesagerie sécurisée zn Nodes utilisant des methodes de chiffrage AES et RSA
+ ceci est une mesagerie sécurisée en Nodes utilisant des methodes de chiffrage AES et RSA
